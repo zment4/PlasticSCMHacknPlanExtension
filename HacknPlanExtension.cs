@@ -13,6 +13,10 @@ namespace Codice.Client.IssueTracker.HacknPlan
 {
     public class HacknPlanExtension : IPlasticIssueTrackerExtension
     {
+        public static readonly int MAX_WORKITEMS_PER_QUERY = 20;
+        public static readonly int MAX_QUERIES_PER_SECOND = 5;
+        public static readonly int MAX_QUERY_TIME_MS = 1000 / MAX_QUERIES_PER_SECOND;
+
         public static readonly string USERNAME_KEY = "Username";
         public static readonly string BRANCH_PREFIX_KEY = "Branch Prefix";
         public static readonly string API_SECRET_KEY = "API Secret";
@@ -123,22 +127,34 @@ namespace Codice.Client.IssueTracker.HacknPlan
         public List<PlasticTask> GetPendingTasksInternal(string assignee = "")
         {
             var taskList = new List<PlasticTask>();
-
-            var userIdQueryItem = string.IsNullOrEmpty(assignee) ? "" : $"&userId={_userId}";
+            var queryParams = new Dictionary<string, string>();
 
             int totalCount;
             int currentOffset = 0;
 
+            if (!string.IsNullOrEmpty(assignee))
+                queryParams["userId"] = $"{_userId}";
+
+            queryParams["stageId"] = $"{ _stageId}";
+            queryParams["offset"] = $"{0}";
+            queryParams["limit"] = $"{MAX_WORKITEMS_PER_QUERY}";
+
             do
             {
-                var query = $"projects/{_projectId}/workitems?limit=100&stageId={_stageId}&offset={currentOffset}{userIdQueryItem}";
-                _log.Info(query);
+                queryParams["offset"] = $"{currentOffset}";
+
+                var query = $"projects/{_projectId}/workitems?{queryParams.AsUriQuery()}";
+                _log.Info($"Querying work items from Uri {httpClient.BaseAddress + query}");
+
+                var lastQueryTime = DateTime.UtcNow;
 
                 var data = GetJsonFromApi(query);
-                _log.Info(data?.ToString());
 
                 if (data == null)
+                {
+                    _log.Error("Querying work items failed, returning items received");
                     return taskList;
+                }
 
                 totalCount = data.totalCount;
                 int queryCount = 0;
@@ -149,6 +165,7 @@ namespace Codice.Client.IssueTracker.HacknPlan
                     queryCount++;
 
                     var hasBoard = HasDynamicProperty(workItem, "board");
+
                     // Ignore backlog if set
                     if (_ignoreBacklog && !hasBoard)
                         continue;
@@ -167,9 +184,11 @@ namespace Codice.Client.IssueTracker.HacknPlan
                         Status = workItem.stage.status
                     });
 
-                    // HacknPlan v0 API rate limit is 5 queries per second per IP
-                    if (queryCount % 5 == 0)
-                        System.Threading.Thread.Sleep(1000);
+                    var timeSinceLastQuery = (int) Math.Ceiling((DateTime.UtcNow - lastQueryTime).TotalMilliseconds);
+                    var timeToWait = MAX_QUERY_TIME_MS - timeSinceLastQuery;
+
+                    if (timeToWait > 0)
+                        System.Threading.Thread.Sleep(timeToWait);
                 }
             } while (totalCount > currentOffset);
 
@@ -334,5 +353,12 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
         public bool HasDynamicProperty(dynamic dynamicObject, string propertyName) =>
             (dynamicObject as JObject).ContainsKey(propertyName);
+    }
+
+    public static class DictionaryExtensions
+    {
+        public static string AsUriQuery(this Dictionary<string, string> queryParams) =>
+            queryParams.Select(x => $"{x.Key}={x.Value}")
+                .Aggregate((current, next) => $"{current}&{next}");
     }
 }
