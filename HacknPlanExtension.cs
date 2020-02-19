@@ -17,10 +17,11 @@ namespace Codice.Client.IssueTracker.HacknPlan
         public static readonly string BRANCH_PREFIX_KEY = "Branch Prefix";
         public static readonly string API_SECRET_KEY = "API Secret";
         public static readonly string PROJECT_ID_KEY = "Project Id";
-        public static readonly string PENDING_STAGE_ID_KEY = "Pending Tasks Stage ID";
-        public static readonly string OPEN_STAGE_ID_KEY = "Open Tasks Stage ID";
+        public static readonly string PENDING_STAGE_ID_KEY = "Pending Tasks Stage Id";
+        public static readonly string OPEN_STAGE_ID_KEY = "Open Tasks Stage Id";
         public static readonly string IGNORE_BACKLOG_KEY = "Ignore Backlog";
-
+        public static readonly string IGNORED_BOARD_IDS_KEY = "Ignored Board Ids";
+        
         IssueTrackerConfiguration _config;
 
         static readonly ILog _log = LogManager.GetLogger("HacknPlan");
@@ -31,6 +32,8 @@ namespace Codice.Client.IssueTracker.HacknPlan
         private int _userId;
         private string _userName;
         private string _stageId;
+        private bool _ignoreBacklog;
+        private List<int> _ignoredBoardIds = new List<int>();
 
         private bool _connected;
         public bool Connected {
@@ -51,6 +54,14 @@ namespace Codice.Client.IssueTracker.HacknPlan
             _log.Info("HacknPlan issue tracker extension initialized");
             _projectId = config.GetValue(PROJECT_ID_KEY);
             _stageId = config.GetValue(PENDING_STAGE_ID_KEY);
+            _ignoreBacklog = Convert.ToBoolean(_config.GetValue(IGNORE_BACKLOG_KEY));
+            try
+            {
+                _ignoredBoardIds = config.GetValue(IGNORED_BOARD_IDS_KEY).Split(',').Select(x => Int32.Parse(x)).ToList();
+            }  catch (NullReferenceException)
+            {
+                _log.Error("Parsing Ignored Board Ids failed");
+            }
         }
 
         public void Connect()
@@ -120,7 +131,7 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
             do
             {
-                var query = $"projects/{_projectId}/workitems?stageId={_stageId}&offset={currentOffset}{userIdQueryItem}";
+                var query = $"projects/{_projectId}/workitems?limit=100&stageId={_stageId}&offset={currentOffset}{userIdQueryItem}";
                 _log.Info(query);
 
                 var data = GetJsonFromApi(query);
@@ -130,12 +141,20 @@ namespace Codice.Client.IssueTracker.HacknPlan
                     return taskList;
 
                 totalCount = data.totalCount;
+                int queryCount = 0;
 
                 foreach (var workItem in data.items)
                 {
                     currentOffset++;
+                    queryCount++;
 
-                    if (Convert.ToBoolean(_config.GetValue(IGNORE_BACKLOG_KEY)) && !HasDynamicProperty(workItem, "board"))
+                    var hasBoard = HasDynamicProperty(workItem, "board");
+                    // Ignore backlog if set
+                    if (_ignoreBacklog && !hasBoard)
+                        continue;
+
+                    // Ignore specific boardId's
+                    if (hasBoard && _ignoredBoardIds.Contains((int) workItem.board.boardId))
                         continue;
 
                     taskList.Add(new PlasticTask()
@@ -147,6 +166,10 @@ namespace Codice.Client.IssueTracker.HacknPlan
                         Owner = workItem.user.username,
                         Status = workItem.stage.status
                     });
+
+                    // HacknPlan v0 API rate limit is 5 queries per second per IP
+                    if (queryCount % 5 == 0)
+                        System.Threading.Thread.Sleep(1000);
                 }
             } while (totalCount > currentOffset);
 
