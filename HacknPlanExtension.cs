@@ -17,6 +17,9 @@ namespace Codice.Client.IssueTracker.HacknPlan
         public static readonly string BRANCH_PREFIX_KEY = "Branch Prefix";
         public static readonly string API_SECRET_KEY = "API Secret";
         public static readonly string PROJECT_ID_KEY = "Project Id";
+        public static readonly string PENDING_STAGE_ID_KEY = "Pending Tasks Stage ID";
+        public static readonly string OPEN_STAGE_ID_KEY = "Open Tasks Stage ID";
+        public static readonly string IGNORE_BACKLOG_KEY = "Ignore Backlog";
 
         IssueTrackerConfiguration _config;
 
@@ -27,6 +30,8 @@ namespace Codice.Client.IssueTracker.HacknPlan
         private string _projectId;
         private int _userId;
         private string _userName;
+        private string _stageId;
+
         private bool _connected;
         public bool Connected {
             get {
@@ -39,29 +44,32 @@ namespace Codice.Client.IssueTracker.HacknPlan
                 return _connected;
             }
         }
+
         internal HacknPlanExtension(IssueTrackerConfiguration config)
         {
             _config = config;
             _log.Info("HacknPlan issue tracker extension initialized");
             _projectId = config.GetValue(PROJECT_ID_KEY);
+            _stageId = config.GetValue(PENDING_STAGE_ID_KEY);
         }
 
         public void Connect()
         {
             httpClient = GetHttpClient(_config);
 
+            var me = GetJsonFromApi("users/me");
+
             try
             {
-                var meJson = httpClient.GetStringAsync("users/me").Result;
-                var me = JsonConvert.DeserializeObject<dynamic>(meJson);
                 _userId = me.id;
                 _userName = me.username;
+
                 _connected = true;
             } catch (AggregateException ae)
             {
                 ae.Handle((x) =>
                 {
-                    if (x is HttpRequestException)
+                    if (x is NullReferenceException)
                     {
                         _log.Error(x.Message);
 
@@ -103,64 +111,58 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
         public List<PlasticTask> GetPendingTasksInternal(string assignee = "")
         {
-            var userIdQueryItem = string.IsNullOrEmpty(assignee) ? "" : $"&userId={_userId}";
-            var query = $"projects/{_projectId}/workitems?limit=100&stageId=5{userIdQueryItem}";
-            _log.Info(query);
-
-            var responseJson = httpClient.GetStringAsync(query).Result;
-            _log.Info($"{responseJson}");
-            var data = JsonConvert.DeserializeObject<dynamic>(responseJson);
-
             var taskList = new List<PlasticTask>();
 
-            foreach (var workItem in data.items)
-            {
-                if (HasDynamicProperty(workItem, "board") == null || workItem.board.boardId == 287859) 
-                    continue;
+            var userIdQueryItem = string.IsNullOrEmpty(assignee) ? "" : $"&userId={_userId}";
 
-                taskList.Add(new PlasticTask() {
-                    CanBeLinked = true,
-                    Id = workItem.workItemId,
-                    Title = workItem.title,
-                    Description = workItem.description,
-                    Owner = workItem.user.username,
-                    Status = workItem.stage.status
-                });
-            }
+            int totalCount;
+            int currentOffset = 0;
+
+            do
+            {
+                var query = $"projects/{_projectId}/workitems?stageId={_stageId}&offset={currentOffset}{userIdQueryItem}";
+                _log.Info(query);
+
+                var data = GetJsonFromApi(query);
+                _log.Info(data?.ToString());
+
+                if (data == null)
+                    return taskList;
+
+                totalCount = data.totalCount;
+
+                foreach (var workItem in data.items)
+                {
+                    currentOffset++;
+
+                    if (Convert.ToBoolean(_config.GetValue(IGNORE_BACKLOG_KEY)) && !HasDynamicProperty(workItem, "board"))
+                        continue;
+
+                    taskList.Add(new PlasticTask()
+                    {
+                        CanBeLinked = true,
+                        Id = workItem.workItemId,
+                        Title = workItem.title,
+                        Description = workItem.description,
+                        Owner = workItem.user.username,
+                        Status = workItem.stage.status
+                    });
+                }
+            } while (totalCount > currentOffset);
 
             return taskList;
         }
 
-        public PlasticTask GetTaskForBranch(string fullBranchName)
-        {
-            if (!Connected) return default;
-
-            var id = GetTaskIdFromBranchName(fullBranchName);
-            if (string.IsNullOrEmpty(id)) return default;
-
-            var workItem = GetWorkItemAsJson(id);
-            if (workItem == null) return default;
-
-            return new PlasticTask() {
-                CanBeLinked = true,
-                Id = id,
-                Title = workItem.title,
-                Description = workItem.description,
-                Owner = workItem.user.username,
-                Status = workItem.stage.status
-            };
-        }
-
-        private dynamic GetWorkItemAsJson(string id)
+        private dynamic GetJsonFromApi(string query)
         {
             string body = "";
             try
             {
-                body = httpClient.GetStringAsync($"projects/{_projectId}/workitems/{id}").Result;
+                body = httpClient.GetStringAsync(query).Result;
             }
-            catch (AggregateException e)
+            catch (AggregateException ae)
             {
-                e.Handle((x) =>
+                ae.Handle((x) =>
                 {
                     if (x is HttpRequestException)
                     {
@@ -175,6 +177,32 @@ namespace Codice.Client.IssueTracker.HacknPlan
             }
 
             return JsonConvert.DeserializeObject<dynamic>(body);
+        }
+
+        public PlasticTask GetTaskForBranch(string fullBranchName)
+        {
+            if (!Connected) return default;
+
+            var id = GetTaskIdFromBranchName(fullBranchName);
+            if (string.IsNullOrEmpty(id)) return default;
+
+            var workItem = GetWorkItemAsJson(id);
+            if (workItem == null) return default;
+            _log.Info(workItem.ToString());
+
+            return new PlasticTask() {
+                CanBeLinked = true,
+                Id = id,
+                Title = workItem.title,
+                Description = workItem.description,
+                Owner = workItem.user.username,
+                Status = workItem.stage.status
+            };
+        }
+
+        private dynamic GetWorkItemAsJson(string id)
+        {
+            return GetJsonFromApi($"projects/{_projectId}/workitems/{id}");
         }
 
         private string GetTaskIdFromBranchName(string fullBranchName)
@@ -207,6 +235,34 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
         public void MarkTaskAsOpen(string taskId, string assignee)
         {
+            var requestBody = JsonConvert.SerializeObject(new { stageId = _config.GetValue(OPEN_STAGE_ID_KEY) });
+
+            var request = new HttpRequestMessage()
+            {
+                Method = new HttpMethod("PATCH"),
+                RequestUri = new Uri($"{httpClient.BaseAddress}projects/{_projectId}/workItems/{taskId}"),
+                Content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json")
+            };
+
+            request.Headers.Authorization = httpClient.DefaultRequestHeaders.Authorization;
+
+            try
+            {
+                var response = httpClient.SendAsync(request).Result;
+            } catch (AggregateException ae)
+            {
+                ae.Handle(x =>
+                {
+                    if (x is HttpRequestException)
+                    {
+                        _log.Error(x.Message);
+
+                        return true;
+                    }
+
+                    return false;
+                });
+            }
         }
 
         public void OpenTaskExternally(string taskId)

@@ -13,18 +13,12 @@ namespace Codice.Client.IssueTracker.HacknPlan
         {
             var workingMode = GetWorkingMode(storedConfiguration);
 
-            var user = GetValidParameterValue(storedConfiguration, HacknPlanExtension.USERNAME_KEY, "");
             var prefix = GetValidParameterValue(storedConfiguration, HacknPlanExtension.BRANCH_PREFIX_KEY, "task_");
             var apiSecret = GetValidParameterValue(storedConfiguration, HacknPlanExtension.API_SECRET_KEY, "");
             var projectId = GetValidParameterValue(storedConfiguration, HacknPlanExtension.PROJECT_ID_KEY, "");
-
-            var userIdParam = new IssueTrackerConfigurationParameter()
-            {
-                Name = HacknPlanExtension.USERNAME_KEY,
-                Value = user,
-                Type = IssueTrackerConfigurationParameterType.User,
-                IsGlobal = false
-            };
+            var pendingStageId = GetValidParameterValue(storedConfiguration, HacknPlanExtension.PENDING_STAGE_ID_KEY, "1");
+            var openStageId = GetValidParameterValue(storedConfiguration, HacknPlanExtension.OPEN_STAGE_ID_KEY, "2");
+            var ignoreBacklog = GetValidParameterValue(storedConfiguration, HacknPlanExtension.IGNORE_BACKLOG_KEY, "true");
 
             var branchPrefixParam = new IssueTrackerConfigurationParameter()
             {
@@ -50,11 +44,38 @@ namespace Codice.Client.IssueTracker.HacknPlan
                 IsGlobal = true
             };
 
+            var pendingStageIdParam = new IssueTrackerConfigurationParameter()
+            {
+                Name = HacknPlanExtension.PENDING_STAGE_ID_KEY,
+                Value = pendingStageId,
+                Type = IssueTrackerConfigurationParameterType.Text,
+                IsGlobal = true
+            };
+
+            var openStageIdParam = new IssueTrackerConfigurationParameter()
+            {
+                Name = HacknPlanExtension.OPEN_STAGE_ID_KEY,
+                Value = openStageId,
+                Type = IssueTrackerConfigurationParameterType.Text,
+                IsGlobal = true
+            };
+
+            var ignoreBacklogParam = new IssueTrackerConfigurationParameter()
+            {
+                Name = HacknPlanExtension.IGNORE_BACKLOG_KEY,
+                Value = ignoreBacklog,
+                Type = IssueTrackerConfigurationParameterType.Boolean,
+                IsGlobal = true
+            };
+
             var parameters = new List<IssueTrackerConfigurationParameter>()
             {
                 branchPrefixParam,
                 apiSecretParam,
-                projectIdParam
+                projectIdParam,
+                pendingStageIdParam,
+                openStageIdParam,
+                ignoreBacklogParam
             };
 
             return new IssueTrackerConfiguration(workingMode, parameters);
