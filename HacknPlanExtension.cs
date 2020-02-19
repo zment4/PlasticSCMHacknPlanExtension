@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net.Http.Headers;
 using Newtonsoft.Json;
 using System.Windows.Forms;
+using Newtonsoft.Json.Linq;
 
 namespace Codice.Client.IssueTracker.HacknPlan
 {
@@ -114,7 +115,7 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
             foreach (var workItem in data.items)
             {
-                if (workItem.board.boardId == 287859) 
+                if (HasDynamicProperty(workItem, "board") == null || workItem.board.boardId == 287859) 
                     continue;
 
                 taskList.Add(new PlasticTask() {
@@ -251,5 +252,8 @@ namespace Codice.Client.IssueTracker.HacknPlan
         public void UpdateLinkedTasksToChangeset(PlasticChangeset changeset, List<string> tasks)
         {
         }
+
+        public bool HasDynamicProperty(dynamic dynamicObject, string propertyName) =>
+            (dynamicObject as JObject).ContainsKey(propertyName);
     }
 }

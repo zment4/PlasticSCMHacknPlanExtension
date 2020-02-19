@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.29806.167
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HacknPlanInterface", "HacknPlanInterface.csproj", "{C3B494B7-8ED2-43B7-9635-F0E759F86B41}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HacknPlanExtension", "HacknPlanExtension.csproj", "{C3B494B7-8ED2-43B7-9635-F0E759F86B41}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
