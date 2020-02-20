@@ -219,7 +219,6 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
             var workItem = GetWorkItemAsJson(id);
             if (workItem == null) return default;
-            _log.Info(workItem.ToString());
 
             return new PlasticTask() {
                 CanBeLinked = true,
@@ -266,7 +265,29 @@ namespace Codice.Client.IssueTracker.HacknPlan
 
         public void MarkTaskAsOpen(string taskId, string assignee)
         {
-            var requestBody = JsonConvert.SerializeObject(new { stageId = _config.GetValue(OPEN_STAGE_ID_KEY) });
+            var workItem = GetWorkItemAsJson(taskId);
+
+            // Workaround the v0 API bug which clears out some fields (like description) when patching
+            // by setting all values in the patch call, even though we only want to change the stageId
+            var newWorkItem = new
+            {
+                title = workItem.title,
+                description = workItem.description,
+                parentId = workItem.parentId,
+                isStory = workItem.isStory,
+                categoryId = workItem.categoryId,
+                estimatedCost = workItem.estimatedCost,
+                importanceLevelId = workItem.importanceLevelId,
+                boardId = workItem.boardId,
+                designElementId = workItem.designElementId,
+                stageId = _config.GetValue(OPEN_STAGE_ID_KEY),
+                startDate = workItem.startDate,
+                dueDate = workItem.dueDate,
+                boardIndex = workItem.boardIndex,
+                designElementIndex = workItem.designElementIndex
+            };
+
+            var requestBody = JsonConvert.SerializeObject(newWorkItem);
 
             var request = new HttpRequestMessage()
             {
