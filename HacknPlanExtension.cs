@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using Newtonsoft.Json;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
+using Microsoft.CSharp.RuntimeBinder;
 
 namespace Codice.Client.IssueTracker.HacknPlan
 {
@@ -80,23 +81,11 @@ namespace Codice.Client.IssueTracker.HacknPlan
                 _userName = me.username;
 
                 _connected = true;
-            } catch (AggregateException ae)
+            } catch (RuntimeBinderException e)
             {
-                ae.Handle((x) =>
-                {
-                    if (x is NullReferenceException)
-                    {
-                        _log.Error(x.Message);
+                _log.Error(e.Message);
 
-                        _connected = false;
-
-                        return true;
-                    }
-
-                    _log.Error(ae.Message);
-
-                    return false;
-                });
+                _connected = false;
             }
         }
 
